@@ -101,16 +101,22 @@ private static async Task RunForSympathyMessage(
     var existingMutualSympathy = await mutualSympathiesRepository.GetSympathyIfExists(sympathySource, sympathyTarget);
     if (existingSympathy != null || existingMutualSympathy != null)
     {
-        var reply0 = activity.CreateReply("You have already registered your sympathy for this person");
-        await client.Conversations.ReplyToActivityAsync(reply0);
+        await ReplyWithHtml(client, activity, new object[] {
+            new XText("You have already registered your sympathy for this person."),
+            new XText(Environment.NewLine),
+            new XText("Use /list to see all registered sympathies."),
+        });
         return;
     }
 
     var existingSympathies = userSympathiesRepository.GetAllSympathies(sympathySource);
     if (existingSympathies.Length >= 10)
     {
-        var reply0 = activity.CreateReply("You have registered too many sympathies; try removing some");
-        await client.Conversations.ReplyToActivityAsync(reply0);
+        await ReplyWithHtml(client, activity, new object[] {
+            new XText("You have registered too many sympathies; try removing some."),
+            new XText(Environment.NewLine),
+            new XText("Use /list to see all registered sympathies."),
+        });
         return;
     }
 
@@ -143,7 +149,19 @@ private static async Task RunForSympathyMessage(
     }
 
     await userSympathiesRepository.AddSympathy(sympathyEntity);
-    await ReplyWithHtml(client, activity, new XText($"You have forwarded message from {sympathyTarget} ({sympathyTarget.Id}). And you are {sympathySource} ({sympathySource.Id}). Sympathy logged!"));
+    await ReplyWithHtml(client, activity, new object[] {
+        new XText($"You have forwarded message from {sympathyTarget} ({sympathyTarget.Id})."),
+        new XText(Environment.NewLine),
+        new XText($"And you are {sympathySource} ({sympathySource.Id})."),
+        new XText(Environment.NewLine),
+        new XText("Sympathy logged!"),
+        new XText(Environment.NewLine),
+        new XText(Environment.NewLine),
+        new XElement("b", new XText("Make sure that you also share your contact with them")),
+        new XText(" (in Telegram privacy settings -> Forwarded messages make sure it's set to Everybody or that they're added to Always Allow.)"),
+        new XText(Environment.NewLine),
+        new XText("Otherwise, they won't be able to record their sympathy to you."),
+    });
 }
 
 private static IEnumerable<XNode> GetDescriptionForList(UserSympathyEntity sympathy)
@@ -197,7 +215,7 @@ private static async Task RunForDelete(ConnectorClient client, Activity activity
 
     if (existingSympathy.Timestamp.AddDays(7) >= DateTimeOffset.UtcNow)
     {
-        var reply0 = activity.CreateReply("You have to wait 30 days until you can forget this sympathy");
+        var reply0 = activity.CreateReply("You have to wait for 7 days before you can forget this sympathy");
         await client.Conversations.ReplyToActivityAsync(reply0);
         return;
     }
@@ -281,7 +299,7 @@ private static async Task RunForStats(
             }
         }
 
-        var reply = activity.CreateReply($"Total: {usersCount} users, {sympathiesCount} non-mutual sympathies, {mutualSympathiesCount} mutual sympathies");
+        var reply = activity.CreateReply($"Total: {usersCount} users, {sympathiesCount} non-mutual sympathies, {mutualSympathiesCount} pairs of mutual sympathies");
         await client.Conversations.ReplyToActivityAsync(reply);
     });
 }
@@ -323,8 +341,8 @@ private static async Task RunForHelp(ConnectorClient client, Activity activity, 
             new XText("There are also basic abuse protections in place: the number of non-mutual sympathies one can express at a time is limited, and there is a reverse cooling-off period, during which a fresh sympathy cannot be cancelled. These limitations are intended to prevent malicious user to brute-force who likes them and who doesn't."),
             new XText(Environment.NewLine),
             new XText(Environment.NewLine),
-            new XElement("b", new XText("Note that in order for bot to work, you both should have enabled contact sharing in telegram!")),
-            new XText(" (in Telegram privacy settings -> Forwarded Messages, either set to Everybody or add @MutualSympathyBot to \"always allow\")"),
+            new XElement("b", new XText("Note that in order for bot to work, you both should have enabled contact sharing with each other in telegram!")),
+            new XText(" (in Telegram privacy settings -> Forwarded Messages, either set to Everybody or add people you want to \"always allow\")"),
             new XText(Environment.NewLine),
             new XText(Environment.NewLine),
             new XText("If you have any feedback or suggestions, feel free to contact my creator @inga_lovinde"),
