@@ -292,12 +292,21 @@ private static async Task RunForSimpleMessage(ConnectorClient client, Activity a
     await ReplyWithHtml(client, activity, new XText("Forward me someone else's message (preferred), or share their contact with me"));
 }
 
+private static async Task RunForPrivateAccount(ConnectorClient client, Activity activity, string name, TraceWriter log)
+{
+    await ReplyWithHtml(client, activity, new object[] {
+        new XText("Unfortunately, "),
+        new XElement("b", new XText(name)),
+        new XText(" does not allow their contact to be shared, so we have no way of knowing their user_id"),
+    });
+}
+
 private static async Task RunForHelp(ConnectorClient client, Activity activity, TraceWriter log)
 {
     await ReplyWithHtml(
         client,
         activity,
-        new [] {
+        new object[] {
             new XText("Forward me someone else's message, and I'll remember that you like them (you can make me forget about that by using commands from /list)"),
             new XText(Environment.NewLine),
             new XText("Alternatively, you can share their contact with me, but message forwarding works better."),
@@ -312,6 +321,10 @@ private static async Task RunForHelp(ConnectorClient client, Activity activity, 
             new XText("The bot attempts to solve this problem, working as an escrow for people's \"feelings\", so that: (a) if two people like each other, bot will inform both of them of their feelings, and (b) if a person X likes person Y, and the feeling is not returned, bot will keep X's secret."),
             new XText(Environment.NewLine),
             new XText("There are also basic abuse protections in place: the number of non-mutual sympathies one can express at a time is limited, and there is a reverse cooling-off period, during which a fresh sympathy cannot be cancelled. These limitations are intended to prevent malicious user to brute-force who likes them and who doesn't."),
+            new XText(Environment.NewLine),
+            new XText(Environment.NewLine),
+            new XElement("b", new XText("Note that in order for bot to work, you both should have enabled contact sharing in telegram!")),
+            new XText(" (in Telegram privacy settings -> Forwarded Messages, either set to Everybody or add @MutualSympathyBot to \"always allow\")"),
             new XText(Environment.NewLine),
             new XText(Environment.NewLine),
             new XText("If you have any feedback or suggestions, feel free to contact my creator @inga_lovinde"),
@@ -423,7 +436,12 @@ private static async Task RunForMessage(
         }
         else
         {
-            await RunForSimpleMessage(client, activity, log);
+            var forwardedFromName = ((dynamic)activity.ChannelData)?.message?.forward_sender_name;
+            if (forwardedFromName != null) {
+                await RunForPrivateAccount(client, activity, forwardedFromName.ToString(), log);
+            } else {
+                await RunForSimpleMessage(client, activity, log);
+            }
         }
     }
     /*catch (Exception e) {
