@@ -206,7 +206,7 @@ private static async Task RunForDelete(ConnectorClient client, Activity activity
     await RunForList(client, activity, user, userSympathiesRepository, mutualSympathiesRepository, log);
 }
 
-private static async Task RunForBroadcastMessage(ConnectorClient client, Activity activity, string broadcastText, UsersRepository usersRepository, TraceWriter log)
+private static async Task RunForAdmin(ConnectorClient client, Activity activity, Func<Task> adminAction)
 {
     if (activity.From.Id.ToString() != "812607159")
     {
@@ -216,36 +216,80 @@ private static async Task RunForBroadcastMessage(ConnectorClient client, Activit
         return;
     }
 
-    var messagesSent = 0;
-    List<string> usersFailed = new List<string>();
-    foreach (var userEntity in usersRepository.GetAllUsers())
-    {
-        var broadcastReply = userEntity.OriginalActivity.CreateReply($"Message from @{activity.From.Name}: {broadcastText}");
-        try
-        {
-            await client.Conversations.ReplyToActivityAsync(broadcastReply);
-            messagesSent++;
-        }
-        catch (Exception)
-        {
-            usersFailed.Add(userEntity.UserInfo.ToString());
-        }
-    }
+    await adminAction();
+}
 
-    var reply = activity.CreateReply($"Message broadcast sent to {messagesSent} users: {broadcastText}");
-    await client.Conversations.ReplyToActivityAsync(reply);
+private static async Task RunForBroadcastMessage(ConnectorClient client, Activity activity, string broadcastText, UsersRepository usersRepository, TraceWriter log)
+{
+    await RunForAdmin(client, activity, async () => {
+        var messagesSent = 0;
+        List<string> usersFailed = new List<string>();
+        // NOTE: Sensitive data processing here,
+        // DO NOT memorize specific users, only store the messages count
+        foreach (var userEntity in usersRepository.GetAllUsers())
+        {
+            var broadcastReply = userEntity.OriginalActivity.CreateReply($"Message from @{activity.From.Name}: {broadcastText}");
+            try
+            {
+                await client.Conversations.ReplyToActivityAsync(broadcastReply);
+                messagesSent++;
+            }
+            catch (Exception)
+            {
+                usersFailed.Add(userEntity.PartitionKey);
+            }
+        }
 
-    if (usersFailed.Any())
-    {
-        reply = activity.CreateReply($"Failed to send message to {usersFailed.Count} users: {string.Join(",", usersFailed)}");
+        var reply = activity.CreateReply($"Message broadcast sent to {messagesSent} users: {broadcastText}");
         await client.Conversations.ReplyToActivityAsync(reply);
-    }
+
+        if (usersFailed.Any())
+        {
+            reply = activity.CreateReply($"Failed to send message to {usersFailed.Count} users: {string.Join(",", usersFailed)}");
+            await client.Conversations.ReplyToActivityAsync(reply);
+        }
+    });
+}
+
+private static async Task RunForStats(
+    ConnectorClient client,
+    Activity activity,
+    UsersRepository usersRepository,
+    UserSympathiesRepository userSympathiesRepository,
+    UserSympathiesRepository mutualSympathiesRepository,
+    TraceWriter log
+)
+{
+    await RunForAdmin(client, activity, async () => {
+        var usersCount = 0;
+        var sympathiesCount = 0;
+        var mutualSympathiesCount = 0;
+        // NOTE: Sensitive data processing here,
+        // DO NOT disaggregate per-user sympathies,
+        // DO NOT process separate users,
+        // ONLY aggregation of total users count / sympathies count (per-bot, NOT per-user) is allowed
+        foreach (var userEntity in usersRepository.GetAllUsers())
+        {
+            usersCount++;
+            try {
+                sympathiesCount += userSympathiesRepository.GetAllSympathies(userEntity.UserInfo).Count();
+                mutualSympathiesCount += mutualSympathiesRepository.GetAllSympathies(userEntity.UserInfo).Count();
+            } catch(Exception) {
+                var debugReply = activity.CreateReply("Malformed user:" + Environment.NewLine + "```" + Environment.NewLine + userEntity.PartitionKey + Environment.NewLine + JsonConvert.SerializeObject(userEntity.UserInfo) + Environment.NewLine + "```");
+                await client.Conversations.ReplyToActivityAsync(debugReply);
+                throw;
+            }
+        }
+
+        var reply = activity.CreateReply($"Total: {usersCount} users, {sympathiesCount} non-mutual sympathies, {mutualSympathiesCount} mutual sympathies");
+        await client.Conversations.ReplyToActivityAsync(reply);
+    });
 }
 
 private static async Task RunForSimpleMessage(ConnectorClient client, Activity activity, TraceWriter log)
 {
     //await ReplyWithMarkdown(client, activity, $"```{Environment.NewLine}{JsonConvert.SerializeObject(activity)}{Environment.NewLine}```");
-    await ReplyWithHtml(client, activity, new XText("Forward me someone else's message"));
+    await ReplyWithHtml(client, activity, new XText("Forward me someone else's message (preferred), or share their contact with me"));
 }
 
 private static async Task RunForHelp(ConnectorClient client, Activity activity, TraceWriter log)
@@ -255,6 +299,8 @@ private static async Task RunForHelp(ConnectorClient client, Activity activity, 
         activity,
         new [] {
             new XText("Forward me someone else's message, and I'll remember that you like them (you can make me forget about that by using commands from /list)"),
+            new XText(Environment.NewLine),
+            new XText("Alternatively, you can share their contact with me, but message forwarding works better."),
             new XText(Environment.NewLine),
             new XText("Once they will forward me your message, I'll notify both of you that you like each other! Until then, I will keep silence."),
             new XText(Environment.NewLine),
@@ -299,6 +345,21 @@ private static async Task RunForMessage(
     {
         //var replyDebug = activity.CreateReply("Debug: " + Environment.NewLine + "```" + Environment.NewLine + JsonConvert.SerializeObject(activity) + Environment.NewLine + "```");
         //await client.Conversations.ReplyToActivityAsync(replyDebug);
+
+        var contact = ((dynamic)activity.ChannelData)?.message?.contact;
+        if (contact != null) {
+            await RunForSympathyMessage(
+                client,
+                activity,
+                userInfo,
+                UserInfo.CreateFromTelegramContact(activity),
+                userSympathiesRepository,
+                mutualSympathiesRepository,
+                log);
+
+            return;
+        }
+
         var forwardedFrom = ((dynamic)activity.ChannelData)?.message?.forward_from;
         if (forwardedFrom != null)
         {
@@ -348,6 +409,16 @@ private static async Task RunForMessage(
                 activity,
                 text.Substring(11),
                 usersRepository,
+                log);
+        }
+        else if (text == "/stats")
+        {
+            await RunForStats(
+                client,
+                activity,
+                usersRepository,
+                userSympathiesRepository,
+                mutualSympathiesRepository,
                 log);
         }
         else

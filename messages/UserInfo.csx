@@ -15,7 +15,7 @@ public class UserInfo
         var userInfo = new UserInfo
         {
             Channel = channel,
-            Id = infoFromChannelData.id?.ToString(),
+            Id = (infoFromChannelData.id?.ToString() ?? infoFromChannelData.user_id?.ToString()),
             Name = infoFromChannelData.username?.ToString(),
             FirstName = infoFromChannelData.first_name?.ToString(),
             LastName = infoFromChannelData.last_name?.ToString(),
@@ -42,6 +42,11 @@ public class UserInfo
     public static UserInfo CreateFromTelegramForwardedFrom(Activity activity)
     {
         return CreateFromTelegramChannelData(activity.ChannelId, ((dynamic)activity.ChannelData).message.forward_from);
+    }
+
+    public static UserInfo CreateFromTelegramContact(Activity activity)
+    {
+        return CreateFromTelegramChannelData(activity.ChannelId, ((dynamic)activity.ChannelData).message.contact);
     }
 
     [JsonProperty(PropertyName = "channel")]
